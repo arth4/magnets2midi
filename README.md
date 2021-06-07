@@ -1,2 +1,8 @@
 # magnets2midi
-generates midi music from of (flatspin) micro-magnetic simulations
+Generates midi music from a [flatspin](https://flatspin.gitlab.io/) micro-magnetic simulations 🧲🎼🎶
+
+Requires [flatspin 🧲](https://flatspin.gitlab.io/) and [pretty-midi 🎵](https://github.com/craffel/pretty-midi)
+
+## Coming soon
+* Scales 
+* Drums
