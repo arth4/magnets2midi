@@ -5,13 +5,13 @@ import numpy as np
 
 
 def addNotes(notes, scale, instrument, tempo=0.5):
-    for i, note in enumerate(notes):        
+    for i, note in enumerate(notes):
         if note >= len(scale):
             continue
         note_name = scale[note % len(scale)]
         note_number = pretty_midi.note_name_to_number(note_name)
         instrument.notes.append(pretty_midi.Note(
-            velocity=100, pitch=note_number, start=0 + tempo*i, end=tempo +tempo*i))
+            velocity=100, pitch=note_number, start=0 + tempo*i, end=tempo + tempo*i))
 
 
 def make_c_scale(num=5):
@@ -22,16 +22,15 @@ def dataset2song(ds, tempo=0.4):
     instruments_notes = dataset2notes(ds)
     intruments = np.random.choice(
         pretty_midi.constants.INSTRUMENT_MAP, len(instruments_notes), replace=False)
-    octaves = np.random.choice(np.arange(2, 5), len(instruments_notes), replace=True)
+    octaves = np.random.choice(
+        np.arange(2, 5), len(instruments_notes), replace=True)
     midi_object = pretty_midi.PrettyMIDI()
     for instr_name, scale_num, instr_notes in zip(intruments, octaves, instruments_notes):
-        # Create an Instrument instance for a cello instrument
         instr_program = pretty_midi.instrument_name_to_program(instr_name)
         instr = pretty_midi.Instrument(program=instr_program)
         c_scale = make_c_scale(scale_num)
         addNotes(instr_notes, c_scale, instr, tempo=tempo)
         midi_object.instruments.append(instr)
-    # midi_object.write(f'{ds.name}.mid')
     return midi_object
 
 
@@ -40,9 +39,7 @@ def dataset2notes(ds, grid_size=(4, 4), scale_size=8):
     poss = np.array(list(zip(geom["posx"].values, geom["posy"].values)))
     grid = Grid.fixed_grid(np.array(poss), grid_size)
     mag = load_output(ds, "mag", grid_size=grid_size, flatten=False)
-    #magnitude = np.linalg.norm(mag, axis=3)[0]
-    cells_with_mags = [(x, y) for x, y in np.unique(grid._grid_index, axis=0)]
-    # notes = [ for x,y in cells_with_mags]
+
     angle = vector_colors(mag[..., 0], mag[..., 1])  # [0,2pi)
     norm_angle = angle/(2*np.pi)  # [0,1)
     norm_angle *= scale_size  # [0,scale_size)
@@ -71,12 +68,14 @@ if __name__ == '__main__':
     from flatspin.cmdline import main_dataset_argparser, main_dataset
 
     parser = main_dataset_argparser("magnets2midi", True)
-    parser.add_argument('--bpm', type=float, default=200,help='beats per minute (default: %(default)s)')
-    parser.add_argument('--seed', type=int, default=0, help='random seed to use (default: %(default)s)')
+    parser.add_argument('--bpm', type=float, default=200,
+                        help='beats per minute (default: %(default)s)')
+    parser.add_argument('--seed', type=int, default=0,
+                        help='random seed to use (default: %(default)s)')
     args = parser.parse_args()
     ds = main_dataset(args)
     assert len(ds) == 1,\
-         "Can only create a song from 1 Dataset, try filtering with '-s' or indexind with '-i'"
+        "Can only create a song from 1 Dataset, try filtering with '-s' or indexind with '-i'"
     np.random.seed(args.seed)
     midi_object = dataset2song(ds, tempo=60/args.bpm)
     out = args.output + (".mid" if args.output.lower()[-4:] != ".mid" else "")
