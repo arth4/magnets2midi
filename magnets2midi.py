@@ -1,7 +1,6 @@
 # %%
 from logging import root
 import re
-from flatspin.grid import Grid
 from flatspin.data import load_output, read_table
 from numpy.core.defchararray import count
 import pretty_midi
@@ -10,35 +9,55 @@ from warnings import warn
 from itertools import count
 from collections import defaultdict
 import os
-
 from pretty_midi import instrument
 import constants
 
-
-def addNotes(notes, scale, instrument, tempo=0.5, return_notes=False):
+def minmax_norm(arr, min_val=0, max_val=1):
+    arr = np.array(arr)
+    arr = (arr - arr.min()) / (arr.max() - arr.min())
+    arr = arr * (max_val - min_val) + min_val
+    return arr
+def addNotes(notes, scale, instrument, tempo=0.5, durations=None, velocities=None, return_notes=False):
     if return_notes:
         result = [""] * len(notes)
-
+    if durations is not None:
+        durations = np.array(durations).astype(int)
+    if velocities is not None:
+        velocities = minmax_norm(velocities, 0, 127).astype(int)
     for i, note in enumerate(notes):
         if note >= len(scale):
             continue
         note_name = scale[note % len(scale)]
         note_number = pretty_midi.note_name_to_number(note_name)
+        end = tempo + tempo*i
+        if durations is not None:
+            end = tempo*durations[i] + tempo*i
         instrument.notes.append(pretty_midi.Note(
-            velocity=100, pitch=note_number, start=0 + tempo*i, end=tempo + tempo*i))
+            velocity=100 if velocities is None else velocities[i], pitch=note_number, start=0 + tempo*i, end=end))
         if return_notes:
             result[i] = note_name
     if return_notes:
         return result
 
+def make_intr_with_notes(midi_object, instr_name, scale_octave, notes, scale_tones, tempo, durations, velos, return_notes=False):
+    instr_program = pretty_midi.instrument_name_to_program(instr_name)
+    instr = pretty_midi.Instrument(program=instr_program)
+    scale_tones_transp = octave_transpose_tones(
+        scale_tones, scale_octave - 1)
+    res = addNotes(notes, scale_tones_transp,
+                    instr, tempo, durations, velos, return_notes)
+    midi_object.instruments.append(instr)
+    if return_notes and not is_dead_instrument(notes):
+        return res
 
-def dataset2song(ds, tempo=0.4, scale=None, octave_range=(3, 5), return_notes=False, allowed_instruments=None):
+def dataset2song(ds, tempo=0.4, scale=None, octave_range=(1, 3), return_notes=False, allowed_instruments=None, durations=None, velocities=None):
     assert 0 <= octave_range[0] < 10 and 0 <= octave_range[1] < 10
     if scale == None:
         scale = make_scale_from_known("major", "C")
     scale_tones = scale2tones(scale)
-    instruments_notes = dataset2notes(ds, scale_size=len(scale_tones))
-    #instruments_notes = [i for i in instruments_notes if not is_dead_instrument(i)]
+    instruments_notes, instruments_durs, instruments_velos= dataset2notes(ds, scale_size=len(scale_tones), durations=durations, velocities=velocities)
+    instruments_durs = instruments_durs if instruments_durs is not None else [None] * len(instruments_notes)
+    instruments_velos = instruments_velos if instruments_velos is not None else [None] * len(instruments_notes)
     if allowed_instruments is None:
         allowed_instruments = pretty_midi.constants.INSTRUMENT_MAP
     intruments = np.random.choice(
@@ -48,35 +67,52 @@ def dataset2song(ds, tempo=0.4, scale=None, octave_range=(3, 5), return_notes=Fa
     midi_object = pretty_midi.PrettyMIDI()
     if return_notes:
         score_info = {}
-    for instr_name, scale_octave, instr_notes in zip(intruments, octaves, instruments_notes):
-        instr_program = pretty_midi.instrument_name_to_program(instr_name)
-        instr = pretty_midi.Instrument(program=instr_program)
-        scale_tones_transp = octave_transpose_tones(
-            scale_tones, scale_octave - 1)
-        res = addNotes(instr_notes, scale_tones_transp,
-                       instr, tempo, return_notes)
-        if return_notes and not is_dead_instrument(instr_notes):
-            score_info[instr_name] = res
-        midi_object.instruments.append(instr)
+    for i_name, scale_octave, i_notes, i_durs, i_velos in zip(intruments, octaves, instruments_notes, instruments_durs, instruments_velos):
+        res = make_intr_with_notes(midi_object, i_name, scale_octave, i_notes, scale_tones, tempo, i_durs, i_velos, return_notes)
+        if res:
+            score_info[i_name] = res
     if return_notes:
         return midi_object, score_info
     return midi_object
 
+def splits(arr, n) :
+    """discretize array into n bins and return the bin index for each element
+        if not enough unique values in arr, bins are biased towards left (smaller values)
+        """
+    return np.digitize(arr, (np.arange(n) * np.ptp(arr))/n + np.min(arr)) - 1
 
-def dataset2notes(ds, grid_size=(12, 12), scale_size=8):
+def dataset2notes(ds, grid_size=(12, 12), scale_size=8, durations=None, velocities=None):
     geom = read_table(ds.tablefile("geom"))
     poss = np.array(list(zip(geom["posx"].values, geom["posy"].values)))
-    grid = Grid.fixed_grid(np.array(poss), grid_size)
+    #grid = Grid.fixed_grid(np.array(poss), grid_size)
     mag = load_output(ds, "mag", grid_size=grid_size, flatten=False)
 
     angle = vector_colors(mag[..., 0], mag[..., 1])  # [0,2pi)
+    
     norm_angle = angle/(2*np.pi)  # [0,1)
     norm_angle *= scale_size  # [0,scale_size)
     norm_angle = norm_angle.round().astype(int)
     norm_angle[norm_angle >= scale_size] = 0
-    intr_notes = [norm_angle[:, i, j]
-                  for i in range(grid_size[0]) for j in range(grid_size[1])]
-    return [filter_repeat_notes(i_n, scale_size) for i_n in intr_notes]
+    instr_notes = norm_angle.T.reshape(np.prod(grid_size), -1)
+    if durations is not None or velocities is not None:
+        if velocities is None:
+            instr_velo = np.ones_like(instr_notes)
+        else:
+            velocities = velocities if velocities is not None else [1]
+            magnitudes = np.linalg.norm(mag, axis=-1)
+            instr_velo = np.array(velocities)[splits(magnitudes, len(velocities))]            
+            instr_velo = instr_velo.T.reshape(np.prod(grid_size), -1) * 100
+        if durations is None:
+            durations = np.ones_like(instr_notes)
+        else:
+            angle_diff = np.abs(np.diff(angle, axis=0, prepend=0)) % (2*np.pi)
+            angle_diff[angle_diff > np.pi] = 2*np.pi - angle_diff[angle_diff > np.pi] # shortest angle difference
+            instr_dur = np.array(durations)[splits(angle_diff, len(durations))]
+            instr_dur = instr_dur.T.reshape(np.prod(grid_size), -1)
+        assert instr_velo.shape == instr_dur.shape == instr_notes.shape
+        return [filter_repeat_notes(i_n, scale_size) for i_n in instr_notes], instr_dur, instr_velo
+
+    return [filter_repeat_notes(i_n, scale_size) for i_n in instr_notes], None, None
 
 
 def filter_repeat_notes(notes, rest_note_num=8):
@@ -284,6 +320,10 @@ if __name__ == '__main__':
     Current choices:
     all, synth, no_sfx
     """)
+    parser.add_argument('--durations', type=float, nargs="+", default=None,
+                        help="list of possible note durations. (normal=1)")
+    parser.add_argument('--velocities', type=float, nargs="+", default=None,
+                        help="list of possible note velocities. (normal=1), (will be multiplied by 100)")
     parser.add_argument('--pdf', action='store_true',
                         help='save music score as pdf')
 
@@ -304,9 +344,9 @@ if __name__ == '__main__':
     if args.pdf:
         import abjad
         midi_object, score_info = dataset2song(
-            ds, tempo=60/args.bpm, scale=scale, return_notes=True, allowed_instruments=instruments)
+            ds, tempo=60/args.bpm, scale=scale, return_notes=True, allowed_instruments=instruments, durations=args.durations, velocities=args.velocities)
     else:
-        midi_object = dataset2song(ds, tempo=60/args.bpm, scale=scale, allowed_instruments=instruments)
+        midi_object = dataset2song(ds, tempo=60/args.bpm, scale=scale, allowed_instruments=instruments, durations=args.durations, velocities=args.velocities)
     out = args.output + (".mid" if args.output.lower()[-4:] != ".mid" else "")
     midi_object.write(out)
 
