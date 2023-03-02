@@ -50,12 +50,15 @@ def make_intr_with_notes(midi_object, instr_name, scale_octave, notes, scale_ton
     if return_notes and not is_dead_instrument(notes):
         return res
 
-def dataset2song(ds, tempo=0.4, scale=None, octave_range=(1, 3), return_notes=False, allowed_instruments=None, durations=None, velocities=None):
-    assert 0 <= octave_range[0] < 10 and 0 <= octave_range[1] < 10
+def dataset2song(ds, tempo=0.4, scale=None, octave_range=(1, 4), return_notes=False, allowed_instruments=None,
+                 durations=None, velocities=None, grid_size=(12, 12), ds_t_filter=None):
+    assert 0 <= octave_range[0] < 10 and 0 <= octave_range[1] < 10, "octave range must be between 0 and 10"
     if scale == None:
         scale = make_scale_from_known("major", "C")
     scale_tones = scale2tones(scale)
-    instruments_notes, instruments_durs, instruments_velos= dataset2notes(ds, scale_size=len(scale_tones), durations=durations, velocities=velocities)
+    instruments_notes, instruments_durs, instruments_velos = dataset2notes(ds, scale_size=len(scale_tones),
+                                                                           durations=durations, velocities=velocities,
+                                                                            grid_size=grid_size, ds_t_filter=ds_t_filter)
     instruments_durs = instruments_durs if instruments_durs is not None else [None] * len(instruments_notes)
     instruments_velos = instruments_velos if instruments_velos is not None else [None] * len(instruments_notes)
     if allowed_instruments is None:
@@ -81,11 +84,11 @@ def splits(arr, n) :
         """
     return np.digitize(arr, (np.arange(n) * np.ptp(arr))/n + np.min(arr)) - 1
 
-def dataset2notes(ds, grid_size=(12, 12), scale_size=8, durations=None, velocities=None):
+def dataset2notes(ds, grid_size=(12, 12), scale_size=8, durations=None, velocities=None, ds_t_filter=None):
     geom = read_table(ds.tablefile("geom"))
     poss = np.array(list(zip(geom["posx"].values, geom["posy"].values)))
     #grid = Grid.fixed_grid(np.array(poss), grid_size)
-    mag = load_output(ds, "mag", grid_size=grid_size, flatten=False)
+    mag = load_output(ds, "mag", grid_size=grid_size, flatten=False, t=ds_t_filter)
 
     angle = vector_colors(mag[..., 0], mag[..., 1])  # [0,2pi)
     
@@ -298,12 +301,14 @@ _NOTE2NUM = {"A": 0, "B": 2, "C": 3, "D": 5, "E": 7, "F": 8, "G": 10}
 KNOWN_INSTRUMENT_CLASSES = {"all": pretty_midi.constants.INSTRUMENT_MAP,
                             "synth" : constants.SYNTH_ONLY,
                             "no_sfx" : constants.NO_SFX,
+                            "rock" : constants.ROCK,
                             }
 # %%
 if __name__ == '__main__':
-    from flatspin.cmdline import main_dataset_argparser, main_dataset
+    from flatspin.cmdline import main_dataset_argparser, main_dataset, parse_time
 
     parser = main_dataset_argparser("magnets2midi", True)
+    parser.add_argument('-t', default='::1',help='time slice to use slice dataset. default: %(default)s')
     parser.add_argument('--bpm', type=float, default=200,
                         help='beats per minute (default: %(default)s)')
     parser.add_argument('--seed', type=int, default=0,
@@ -318,8 +323,12 @@ if __name__ == '__main__':
     parser.add_argument("--instruments",type=str,  default="all",help="""
     specify a subset of the instruments to use. 
     Current choices:
-    all, synth, no_sfx
+    all, synth, no_sfx, rock
     """)
+    parser.add_argument('--oct-range', type=int, nargs=2, default=[1, 4], help="octave ranges (min max) that the instruments can choose from")
+    parser.add_argument('--grid-size', type=int, nargs="+", default=[4, 4], help="""
+    grid size to use for the song either as a single number (4) (will be used for both dimensions)
+      or as a list of 2 numbers (4 4)""")
     parser.add_argument('--durations', type=float, nargs="+", default=None,
                         help="list of possible note durations. (normal=1)")
     parser.add_argument('--velocities', type=float, nargs="+", default=None,
@@ -330,8 +339,12 @@ if __name__ == '__main__':
     args = parser.parse_args()
     scale = parse_scale(args.scale)
     ds = main_dataset(args)
+    assert len(args.grid_size) <= 2, f"grid size must be 1 or 2 numbers, got {len(args.grid_size)}"
+    if len(args.grid_size) == 1:
+        args.grid_size = [args.grid_size[0], args.grid_size[0]]
     assert len(ds) == 1, \
         "Can only create a song from 1 Dataset, try filtering with '-s' or indexing with '-i'"
+    t = parse_time(args.t)
     np.random.seed(args.seed)
     instruments =[]
     if args.instruments.lower() not in KNOWN_INSTRUMENT_CLASSES:
@@ -344,9 +357,13 @@ if __name__ == '__main__':
     if args.pdf:
         import abjad
         midi_object, score_info = dataset2song(
-            ds, tempo=60/args.bpm, scale=scale, return_notes=True, allowed_instruments=instruments, durations=args.durations, velocities=args.velocities)
+            ds, tempo=60/args.bpm, scale=scale, return_notes=True, allowed_instruments=instruments,
+            durations=args.durations, velocities=args.velocities, oct_range=tuple(args.oct_range),
+            grid_size=tuple(args.grid_size), ds_t_filter=t)
     else:
-        midi_object = dataset2song(ds, tempo=60/args.bpm, scale=scale, allowed_instruments=instruments, durations=args.durations, velocities=args.velocities)
+        midi_object = dataset2song(ds, tempo=60/args.bpm, scale=scale, allowed_instruments=instruments,
+                                   durations=args.durations, velocities=args.velocities, octave_range=tuple(args.oct_range),
+                                      grid_size=tuple(args.grid_size), ds_t_filter=t)
     out = args.output + (".mid" if args.output.lower()[-4:] != ".mid" else "")
     midi_object.write(out)
 

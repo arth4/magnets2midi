@@ -44,3 +44,11 @@ NO_SFX = ['Acoustic Grand Piano', 'Bright Acoustic Piano',
                   'Shamisen', 'Koto', 'Kalimba', 'Bagpipe', 'Fiddle',
                   'Shanai', 'Tinkle Bell', 'Agogo', 'Steel Drums',
                   'Woodblock', 'Taiko Drum', 'Melodic Tom', 'Synth Drum']
+
+ROCK = ['Rock Organ','Electric Guitar (jazz)',
+                  'Electric Guitar (clean)', 'Electric Guitar (muted)',
+                  'Overdriven Guitar', 'Distortion Guitar',
+                  'Guitar Harmonics', 'Electric Bass (finger)', 'Electric Bass (pick)',
+                  'Fretless Bass', 'Slap Bass 1', 'Slap Bass 2',
+                  'Timpani','Choir Aahs', 'Voice Oohs',
+                  'Woodblock', 'Taiko Drum', 'Melodic Tom', 'Synth Drum']
