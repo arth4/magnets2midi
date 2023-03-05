@@ -52,3 +52,5 @@ ROCK = ['Rock Organ','Electric Guitar (jazz)',
                   'Fretless Bass', 'Slap Bass 1', 'Slap Bass 2',
                   'Timpani','Choir Aahs', 'Voice Oohs',
                   'Woodblock', 'Taiko Drum', 'Melodic Tom', 'Synth Drum']
+
+VOICE = ['Choir Aahs', 'Voice Oohs', 'Synth Choir']
