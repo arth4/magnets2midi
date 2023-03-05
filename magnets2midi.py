@@ -302,6 +302,7 @@ KNOWN_INSTRUMENT_CLASSES = {"all": pretty_midi.constants.INSTRUMENT_MAP,
                             "synth" : constants.SYNTH_ONLY,
                             "no_sfx" : constants.NO_SFX,
                             "rock" : constants.ROCK,
+                            "voice" : constants.VOICE,
                             }
 # %%
 if __name__ == '__main__':
